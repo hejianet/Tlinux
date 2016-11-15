@@ -44,7 +44,6 @@ md5sum 3ea3b9c6b3f7da561ed9d7fe6e2a19a3  kernel-3.10.0-327.13.1.el7.1.ppc64le.rp
 
 
 2016 Nov 14
-之前的i40e需要随着kernel的update而rebuild以下，另外如果你们自己需要更新kernel也要注意这点
 
 更新的i40e在这里
 https://pan.baidu.com/s/1nv8SK8x
