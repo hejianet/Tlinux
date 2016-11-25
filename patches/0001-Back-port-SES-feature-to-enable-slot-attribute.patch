@@ -1,0 +1,349 @@
+From f928ab31f8b0092940f015003fc132a265015bfc Mon Sep 17 00:00:00 2001
+From: Simon Guo <wei.guo.simon@gmail.com>
+Date: Mon, 26 Sep 2016 00:35:51 -0400
+Subject: [PATCH] Back port SES feature to enable slot attribute.
+
+---
+ drivers/misc/enclosure.c  | 99 +++++++++++++++++++++++++++++++++--------------
+ drivers/scsi/ses.c        | 50 +++++++++++++++++-------
+ include/linux/enclosure.h |  7 +++-
+ 3 files changed, 111 insertions(+), 45 deletions(-)
+
+diff --git a/drivers/misc/enclosure.c b/drivers/misc/enclosure.c
+index db2e67a..906b8ab 100644
+--- a/drivers/misc/enclosure.c
++++ b/drivers/misc/enclosure.c
+@@ -145,8 +145,10 @@ enclosure_register(struct device *dev, const char *name, int components,
+ 	if (err)
+ 		goto err;
+ 
+-	for (i = 0; i < components; i++)
++	for (i = 0; i < components; i++) {
+ 		edev->component[i].number = -1;
++		edev->component[i].slot = -1;
++	}
+ 
+ 	mutex_lock(&container_list_lock);
+ 	list_add_tail(&edev->node, &container_list);
+@@ -271,30 +273,29 @@ enclosure_component_find_by_name(struct enclosure_device *edev,
+ 	return NULL;
+ }
+ 
+-static const struct attribute_group *enclosure_groups[];
++static const struct attribute_group *enclosure_component_groups[];
+ 
+ /**
+- * enclosure_component_register - add a particular component to an enclosure
++ * enclosure_component_alloc - prepare a new enclosure component
+  * @edev:	the enclosure to add the component
+  * @num:	the device number
+  * @type:	the type of component being added
+  * @name:	an optional name to appear in sysfs (leave NULL if none)
+  *
+- * Registers the component.  The name is optional for enclosures that
+- * give their components a unique name.  If not, leave the field NULL
+- * and a name will be assigned.
++ * The name is optional for enclosures that give their components a unique
++ * name.  If not, leave the field NULL and a name will be assigned.
+  *
+  * Returns a pointer to the enclosure component or an error.
+  */
+ struct enclosure_component *
+-enclosure_component_register(struct enclosure_device *edev,
+-			     unsigned int number,
+-			     enum enclosure_component_type type,
+-			     const char *name)
++enclosure_component_alloc(struct enclosure_device *edev,
++			  unsigned int number,
++			  enum enclosure_component_type type,
++			  const char *name)
+ {
+ 	struct enclosure_component *ecomp;
+ 	struct device *cdev;
+-	int err, i;
++	int i;
+ 	char newname[COMPONENT_NAME_SIZE];
+ 
+ 	if (number >= edev->components)
+@@ -326,16 +327,32 @@ enclosure_component_register(struct enclosure_device *edev,
+ 		dev_set_name(cdev, "%u", number);
+ 
+ 	cdev->release = enclosure_component_release;
+-	cdev->groups = enclosure_groups;
++	cdev->groups = enclosure_component_groups;
+ 
++	return ecomp;
++}
++EXPORT_SYMBOL_GPL(enclosure_component_alloc);
++
++/**
++ * enclosure_component_register - publishes an initialized enclosure component
++ * @ecomp:	component to add
++ *
++ * Returns 0 on successful registration, releases the component otherwise
++ */
++int enclosure_component_register(struct enclosure_component *ecomp)
++{
++	struct device *cdev;
++	int err;
++
++	cdev = &ecomp->cdev;
+ 	err = device_register(cdev);
+ 	if (err) {
+ 		ecomp->number = -1;
+ 		put_device(cdev);
+-		return ERR_PTR(err);
++		return err;
+ 	}
+ 
+-	return ecomp;
++	return 0;
+ }
+ EXPORT_SYMBOL_GPL(enclosure_component_register);
+ 
+@@ -409,25 +426,39 @@ EXPORT_SYMBOL_GPL(enclosure_remove_device);
+  * sysfs pieces below
+  */
+ 
+-static ssize_t enclosure_show_components(struct device *cdev,
+-					 struct device_attribute *attr,
+-					 char *buf)
++static ssize_t components_show(struct device *cdev,
++			       struct device_attribute *attr, char *buf)
+ {
+ 	struct enclosure_device *edev = to_enclosure_device(cdev);
+ 
+ 	return snprintf(buf, 40, "%d\n", edev->components);
+ }
++static DEVICE_ATTR_RO(components);
+ 
+-static struct device_attribute enclosure_attrs[] = {
+-	__ATTR(components, S_IRUGO, enclosure_show_components, NULL),
+-	__ATTR_NULL
++static ssize_t id_show(struct device *cdev,
++				 struct device_attribute *attr,
++				 char *buf)
++{
++	struct enclosure_device *edev = to_enclosure_device(cdev);
++
++	if (edev->cb->show_id)
++		return edev->cb->show_id(edev, buf);
++	return -EINVAL;
++}
++static DEVICE_ATTR_RO(id);
++
++static struct attribute *enclosure_class_attrs[] = {
++	&dev_attr_components.attr,
++	&dev_attr_id.attr,
++	NULL,
+ };
++ATTRIBUTE_GROUPS(enclosure_class);
+ 
+ static struct class enclosure_class = {
+ 	.name			= "enclosure",
+ 	.owner			= THIS_MODULE,
+ 	.dev_release		= enclosure_release,
+-	.dev_attrs		= enclosure_attrs,
++	.dev_groups		= enclosure_class_groups,
+ };
+ 
+ static const char *const enclosure_status [] = {
+@@ -561,6 +592,20 @@ static ssize_t get_component_type(struct device *cdev,
+ 	return snprintf(buf, 40, "%s\n", enclosure_type[ecomp->type]);
+ }
+ 
++static ssize_t get_component_slot(struct device *cdev,
++				  struct device_attribute *attr, char *buf)
++{
++	struct enclosure_component *ecomp = to_enclosure_component(cdev);
++	int slot;
++
++	/* if the enclosure does not override then use 'number' as a stand-in */
++	if (ecomp->slot >= 0)
++		slot = ecomp->slot;
++	else
++		slot = ecomp->number;
++
++	return snprintf(buf, 40, "%d\n", slot);
++}
+ 
+ static DEVICE_ATTR(fault, S_IRUGO | S_IWUSR, get_component_fault,
+ 		    set_component_fault);
+@@ -571,6 +616,7 @@ static DEVICE_ATTR(active, S_IRUGO | S_IWUSR, get_component_active,
+ static DEVICE_ATTR(locate, S_IRUGO | S_IWUSR, get_component_locate,
+ 		   set_component_locate);
+ static DEVICE_ATTR(type, S_IRUGO, get_component_type, NULL);
++static DEVICE_ATTR(slot, S_IRUGO, get_component_slot, NULL);
+ 
+ static struct attribute *enclosure_component_attrs[] = {
+ 	&dev_attr_fault.attr,
+@@ -578,17 +624,10 @@ static struct attribute *enclosure_component_attrs[] = {
+ 	&dev_attr_active.attr,
+ 	&dev_attr_locate.attr,
+ 	&dev_attr_type.attr,
++	&dev_attr_slot.attr,
+ 	NULL
+ };
+-
+-static struct attribute_group enclosure_group = {
+-	.attrs = enclosure_component_attrs,
+-};
+-
+-static const struct attribute_group *enclosure_groups[] = {
+-	&enclosure_group,
+-	NULL
+-};
++ATTRIBUTE_GROUPS(enclosure_component);
+ 
+ static int __init enclosure_init(void)
+ {
+diff --git a/drivers/scsi/ses.c b/drivers/scsi/ses.c
+index 80bfece..3e59a5d 100644
+--- a/drivers/scsi/ses.c
++++ b/drivers/scsi/ses.c
+@@ -47,7 +47,6 @@ struct ses_device {
+ 
+ struct ses_component {
+ 	u64 addr;
+-	unsigned char *desc;
+ };
+ 
+ static int ses_probe(struct device *dev)
+@@ -258,6 +257,14 @@ static int ses_set_active(struct enclosure_device *edev,
+ 	return ses_set_page2_descriptor(edev, ecomp, desc);
+ }
+ 
++static int ses_show_id(struct enclosure_device *edev, char *buf)
++{
++	struct ses_device *ses_dev = edev->scratch;
++	unsigned long long id = get_unaligned_be64(ses_dev->page1+8+4);
++
++	return sprintf(buf, "%#llx\n", id);
++}
++
+ static struct enclosure_component_callbacks ses_enclosure_callbacks = {
+ 	.get_fault		= ses_get_fault,
+ 	.set_fault		= ses_set_fault,
+@@ -265,6 +272,7 @@ static struct enclosure_component_callbacks ses_enclosure_callbacks = {
+ 	.get_locate		= ses_get_locate,
+ 	.set_locate		= ses_set_locate,
+ 	.set_active		= ses_set_active,
++	.show_id		= ses_show_id,
+ };
+ 
+ struct ses_host_edev {
+@@ -298,19 +306,26 @@ static void ses_process_descriptor(struct enclosure_component *ecomp,
+ 	int invalid = desc[0] & 0x80;
+ 	enum scsi_protocol proto = desc[0] & 0x0f;
+ 	u64 addr = 0;
++	int slot = -1;
+ 	struct ses_component *scomp = ecomp->scratch;
+ 	unsigned char *d;
+ 
+-	scomp->desc = desc;
+-
+ 	if (invalid)
+ 		return;
+ 
+ 	switch (proto) {
++	case SCSI_PROTOCOL_FCP:
++		if (eip) {
++			d = desc + 4;
++			slot = d[3];
++		}
++		break;
+ 	case SCSI_PROTOCOL_SAS:
+-		if (eip)
++		if (eip) {
++			d = desc + 4;
++			slot = d[3];
+ 			d = desc + 8;
+-		else
++		} else
+ 			d = desc + 4;
+ 		/* only take the phy0 addr */
+ 		addr = (u64)d[12] << 56 |
+@@ -326,6 +341,7 @@ static void ses_process_descriptor(struct enclosure_component *ecomp,
+ 		/* FIXME: Need to add more protocols than just SAS */
+ 		break;
+ 	}
++	ecomp->slot = slot;
+ 	scomp->addr = addr;
+ }
+ 
+@@ -349,7 +365,8 @@ static int ses_enclosure_find_by_addr(struct enclosure_device *edev,
+ 		if (scomp->addr != efd->addr)
+ 			continue;
+ 
+-		enclosure_add_device(edev, i, efd->dev);
++		if (enclosure_add_device(edev, i, efd->dev) == 0)
++			kobject_uevent(&efd->dev->kobj, KOBJ_CHANGE);
+ 		return 1;
+ 	}
+ 	return 0;
+@@ -423,16 +440,23 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
+ 			    type_ptr[0] == ENCLOSURE_COMPONENT_ARRAY_DEVICE) {
+ 
+ 				if (create)
+-					ecomp =	enclosure_component_register(edev,
+-									     components++,
+-									     type_ptr[0],
+-									     name);
++					ecomp =	enclosure_component_alloc(
++						edev,
++						components++,
++						type_ptr[0],
++						name);
+ 				else
+ 					ecomp = &edev->component[components++];
+ 
+-				if (!IS_ERR(ecomp) && addl_desc_ptr)
+-					ses_process_descriptor(ecomp,
+-							       addl_desc_ptr);
++				if (!IS_ERR(ecomp)) {
++					if (addl_desc_ptr)
++						ses_process_descriptor(
++							ecomp,
++							addl_desc_ptr);
++					if (create)
++						enclosure_component_register(
++							ecomp);
++				}
+ 			}
+ 			if (desc_ptr)
+ 				desc_ptr += len;
+diff --git a/include/linux/enclosure.h b/include/linux/enclosure.h
+index 9a33c5f..0f826c1 100644
+--- a/include/linux/enclosure.h
++++ b/include/linux/enclosure.h
+@@ -79,6 +79,7 @@ struct enclosure_component_callbacks {
+ 	int (*set_locate)(struct enclosure_device *,
+ 			  struct enclosure_component *,
+ 			  enum enclosure_component_setting);
++	int (*show_id)(struct enclosure_device *, char *buf);
+ };
+ 
+ 
+@@ -91,6 +92,7 @@ struct enclosure_component {
+ 	int fault;
+ 	int active;
+ 	int locate;
++	int slot;
+ 	enum enclosure_status status;
+ };
+ 
+@@ -120,8 +122,9 @@ enclosure_register(struct device *, const char *, int,
+ 		   struct enclosure_component_callbacks *);
+ void enclosure_unregister(struct enclosure_device *);
+ struct enclosure_component *
+-enclosure_component_register(struct enclosure_device *, unsigned int,
+-				 enum enclosure_component_type, const char *);
++enclosure_component_alloc(struct enclosure_device *, unsigned int,
++			  enum enclosure_component_type, const char *);
++int enclosure_component_register(struct enclosure_component *);
+ int enclosure_add_device(struct enclosure_device *enclosure, int component,
+ 			 struct device *dev);
+ int enclosure_remove_device(struct enclosure_device *, struct device *);
+-- 
+1.8.3.1
+

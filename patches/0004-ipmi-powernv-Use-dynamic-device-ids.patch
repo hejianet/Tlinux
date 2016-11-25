@@ -1,0 +1,208 @@
+From 6ddefc78e9efed35f34c2085f0720f94feeb521c Mon Sep 17 00:00:00 2001
+From: Feifei Xu <feifei.xu@cn.ibm.com>
+Date: Thu, 29 Sep 2016 11:51:44 +0800
+Subject: [PATCH 4/4]  ipmi/powernv: Use dynamic device ids
+
+We don't currently provide any device ID info in the SMI registration,
+so use the dynamic ID infrastructure instead.
+
+Signed-off-by: Jeremy Kerr <jk@ozlabs.org>
+
+Signed-off-by: Feifei Xu <feifei.xu@cn.ibm.com>
+---
+ drivers/char/ipmi/ipmi_msghandler.c | 25 +++++++++++++++++--------
+ drivers/char/ipmi/ipmi_powernv.c    |  5 +----
+ drivers/char/ipmi/ipmi_si_intf.c    |  1 -
+ drivers/char/ipmi/ipmi_ssif.c       | 13 ++++++++++---
+ include/linux/ipmi_smi.h            |  3 +--
+ 5 files changed, 29 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/char/ipmi/ipmi_msghandler.c b/drivers/char/ipmi/ipmi_msghandler.c
+index fd58a72..9300b65 100644
+--- a/drivers/char/ipmi/ipmi_msghandler.c
++++ b/drivers/char/ipmi/ipmi_msghandler.c
+@@ -357,7 +357,7 @@ struct ipmi_smi {
+ 	 * an umpreemptible region to use this.  You must fetch the
+ 	 * value into a local variable and make sure it is not NULL.
+ 	 */
+-	struct ipmi_smi_handlers *handlers;
++	const struct ipmi_smi_handlers *handlers;
+ 	void                     *send_info;
+ 
+ #ifdef CONFIG_PROC_FS
+@@ -771,7 +771,13 @@ static void deliver_response(struct ipmi_recv_msg *msg)
+ 			ipmi_inc_stat(intf, unhandled_local_responses);
+ 		}
+ 		ipmi_free_recv_msg(msg);
+-	} else {
++	} else if (!oops_in_progress) {
++		/*
++		 * If we are running in the panic context, calling the
++		 * receive handler doesn't much meaning and has a deadlock
++		 * risk.  At this moment, simply skip it in that case.
++		 */
++
+ 		ipmi_user_t user = msg->user;
+ 		user->handler->ipmi_recv_hndl(msg, user->handler_data);
+ 	}
+@@ -1042,7 +1048,7 @@ int ipmi_get_smi_info(int if_num, struct ipmi_smi_info *data)
+ {
+ 	int           rv = 0;
+ 	ipmi_smi_t    intf;
+-	struct ipmi_smi_handlers *handlers;
++	const struct ipmi_smi_handlers *handlers;
+ 
+ 	mutex_lock(&ipmi_interfaces_mutex);
+ 	list_for_each_entry_rcu(intf, &ipmi_interfaces, link) {
+@@ -1530,7 +1536,7 @@ static struct ipmi_smi_msg *smi_add_send_msg(ipmi_smi_t intf,
+ }
+ 
+ 
+-static void smi_send(ipmi_smi_t intf, struct ipmi_smi_handlers *handlers,
++static void smi_send(ipmi_smi_t intf, const struct ipmi_smi_handlers *handlers,
+ 		     struct ipmi_smi_msg *smi_msg, int priority)
+ {
+ 	int run_to_completion = intf->run_to_completion;
+@@ -2974,11 +2980,10 @@ void ipmi_poll_interface(ipmi_user_t user)
+ }
+ EXPORT_SYMBOL(ipmi_poll_interface);
+ 
+-int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
++int ipmi_register_smi(const struct ipmi_smi_handlers *handlers,
+ 		      void		       *send_info,
+ 		      struct ipmi_device_id    *device_id,
+ 		      struct device            *si_dev,
+-		      const char               *sysfs_name,
+ 		      unsigned char            slave_addr)
+ {
+ 	int              i, j;
+@@ -3102,8 +3107,12 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
+ 		intf->null_user_handler = channel_handler;
+ 		intf->curr_channel = 0;
+ 		rv = send_channel_info_cmd(intf, 0);
+-		if (rv)
++		if (rv) {
++			printk(KERN_WARNING PFX
++			       "Error sending channel information for channel"
++			       " 0, %d\n", rv);
+ 			goto out;
++		}
+ 
+ 		/* Wait for the channel info to be read. */
+ 		wait_event(intf->waitq,
+@@ -4247,7 +4256,7 @@ static void check_msg_timeout(ipmi_smi_t intf, struct seq_table *ent,
+ 			      unsigned int *waiting_msgs)
+ {
+ 	struct ipmi_recv_msg     *msg;
+-	struct ipmi_smi_handlers *handlers;
++	const struct ipmi_smi_handlers *handlers;
+ 
+ 	if (intf->in_shutdown)
+ 		return;
+diff --git a/drivers/char/ipmi/ipmi_powernv.c b/drivers/char/ipmi/ipmi_powernv.c
+index b7b70d0..778a0bc 100644
+--- a/drivers/char/ipmi/ipmi_powernv.c
++++ b/drivers/char/ipmi/ipmi_powernv.c
+@@ -21,7 +21,6 @@
+ 
+ struct ipmi_smi_powernv {
+ 	u64			interface_id;
+-	struct ipmi_device_id	ipmi_id;
+ 	ipmi_smi_t		intf;
+ 	u64			event;
+ 	struct notifier_block	event_nb;
+@@ -258,9 +257,7 @@ static int ipmi_powernv_probe(struct platform_device *pdev)
+ 		goto err_unregister;
+ 	}
+ 
+-	/* todo: query actual ipmi_device_id */
+-	rc = ipmi_register_smi(&ipmi_powernv_smi_handlers, ipmi,
+-		       &ipmi->ipmi_id, dev, "powernv", 0);
++	rc = ipmi_register_smi(&ipmi_powernv_smi_handlers, ipmi, NULL, dev, 0);
+ 	if (rc) {
+ 		dev_warn(dev, "IPMI SMI registration failed (%d)\n", rc);
+ 		goto err_free_msg;
+diff --git a/drivers/char/ipmi/ipmi_si_intf.c b/drivers/char/ipmi/ipmi_si_intf.c
+index 3f13b98..8612fdc 100644
+--- a/drivers/char/ipmi/ipmi_si_intf.c
++++ b/drivers/char/ipmi/ipmi_si_intf.c
+@@ -3489,7 +3489,6 @@ static int try_smi_init(struct smi_info *new_smi)
+ 			       new_smi,
+ 			       &new_smi->device_id,
+ 			       new_smi->dev,
+-			       "bmc",
+ 			       new_smi->slave_addr);
+ 	if (rv) {
+ 		dev_err(new_smi->dev, "Unable to register device: error %d\n",
+diff --git a/drivers/char/ipmi/ipmi_ssif.c b/drivers/char/ipmi/ipmi_ssif.c
+index 28bac20..c9a9e05 100644
+--- a/drivers/char/ipmi/ipmi_ssif.c
++++ b/drivers/char/ipmi/ipmi_ssif.c
+@@ -1137,6 +1137,10 @@ module_param_array(slave_addrs, int, &num_slave_addrs, 0);
+ MODULE_PARM_DESC(slave_addrs,
+ 		 "The default IPMB slave address for the controller.");
+ 
++static bool alerts_broken;
++module_param(alerts_broken, bool, 0);
++MODULE_PARM_DESC(alerts_broken, "Don't enable alerts for the controller.");
++
+ /*
+  * Bit 0 enables message debugging, bit 1 enables state debugging, and
+  * bit 2 enables timing debugging.  This is an array indexed by
+@@ -1459,7 +1463,7 @@ static int ssif_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ 		goto out;
+ 
+ 	rv = ipmi_demangle_device_id(msg[0], msg[1],
+-		resp+2, len-2, &ssif_info->device_id);
++			resp+2, len-2, &ssif_info->device_id);
+ 	if (rv)
+ 		goto out;
+ 
+@@ -1584,6 +1588,10 @@ static int ssif_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ 		ssif_info->global_enables |= IPMI_BMC_EVT_MSG_BUFF;
+ 	}
+ 
++	/* Some systems don't behave well if you enable alerts. */
++	if (alerts_broken)
++		goto found;
++
+ 	msg[0] = IPMI_NETFN_APP_REQUEST << 2;
+ 	msg[1] = IPMI_SET_BMC_GLOBAL_ENABLES_CMD;
+ 	msg[2] = ssif_info->global_enables | IPMI_BMC_RCV_MSG_INTR;
+@@ -1650,7 +1658,6 @@ static int ssif_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ 			       ssif_info,
+ 			       &ssif_info->device_id,
+ 			       &ssif_info->client->dev,
+-			       "ssif",
+ 			       slave_addr);
+ 	 if (rv) {
+ 		pr_err(PFX "Unable to register device: error %d\n", rv);
+@@ -1790,7 +1797,7 @@ skip_addr:
+ }
+ 
+ #ifdef CONFIG_ACPI
+-static struct acpi_device_id ssif_acpi_match[] = {
++static const struct acpi_device_id ssif_acpi_match[] = {
+ 	{ "IPI0001", 0 },
+ 	{ },
+ };
+diff --git a/include/linux/ipmi_smi.h b/include/linux/ipmi_smi.h
+index ea9e8ed..85cb5f0 100644
+--- a/include/linux/ipmi_smi.h
++++ b/include/linux/ipmi_smi.h
+@@ -228,11 +228,10 @@ static inline int ipmi_demangle_device_id(uint8_t netfn, uint8_t cmd,
+    upper layer until the start_processing() function in the handlers
+    is called, and the lower layer must get the interface from that
+    call. */
+-int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
++int ipmi_register_smi(const struct ipmi_smi_handlers *handlers,
+ 		      void                     *send_info,
+ 		      struct ipmi_device_id    *device_id,
+ 		      struct device            *dev,
+-		      const char               *sysfs_name,
+ 		      unsigned char            slave_addr);
+ 
+ /*
+-- 
+1.8.3.1
+

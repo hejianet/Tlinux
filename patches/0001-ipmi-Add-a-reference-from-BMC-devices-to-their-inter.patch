@@ -1,0 +1,38 @@
+From 8dc004d397a8acb10781a2a8ba76711bc95f72fa Mon Sep 17 00:00:00 2001
+From: root <root@elvis-n01-kvm.rch.kstart.ibm.com>
+Date: Mon, 26 Sep 2016 16:36:47 +0800
+Subject: [PATCH 1/4] ipmi: Add a reference from BMC devices to their
+ interfaces
+
+In an upcoming change, we'll want to grab a reference to the ipmi_smi_t
+from a struct bmc_device. This change adds a pointer to allow this.
+
+Signed-off-by: Jeremy Kerr <jk@ozlabs.org>
+Signed-off-by: Feifei Xu <feifei.xu@cn.ibm.com>
+---
+ drivers/char/ipmi/ipmi_msghandler.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/char/ipmi/ipmi_msghandler.c b/drivers/char/ipmi/ipmi_msghandler.c
+index d7bd0ad..653e075 100644
+--- a/drivers/char/ipmi/ipmi_msghandler.c
++++ b/drivers/char/ipmi/ipmi_msghandler.c
+@@ -197,6 +197,7 @@ struct ipmi_proc_entry {
+ struct bmc_device {
+ 	struct platform_device pdev;
+ 	struct ipmi_device_id  id;
++	ipmi_smi_t             intf;
+ 	unsigned char          guid[16];
+ 	int                    guid_set;
+ 	char                   name[16];
+@@ -2807,6 +2808,7 @@ int ipmi_register_smi(struct ipmi_smi_handlers *handlers,
+ 	}
+ 	intf->intf_num = -1; /* Mark it invalid for now. */
+ 	kref_init(&intf->refcount);
++	intf->bmc->intf = intf;
+ 	intf->bmc->id = *device_id;
+ 	intf->si_dev = si_dev;
+ 	for (j = 0; j < IPMI_MAX_CHANNELS; j++) {
+-- 
+1.8.3.1
+
