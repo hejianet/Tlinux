@@ -1,0 +1,31 @@
+https://pan.baidu.com/s/1c2iLros下载kernel src
+rpm -ivh kernel_src.rpm
+rpmbuild -bp kernel.spec  Coz building i40e.ko depends on the kernel src directory
+
+wget  https://downloadmirror.intel.com/26001/eng/i40e-1.4.25.tar.gz
+
+tar -vxf i40e-1.4.25.tar.gz
+然后改下spec文件
+[root@localhost i40e]# diff -urpN i40e-1.4.25/i40e.spec i40e.spec 
+--- i40e-1.4.25/i40e.spec       2016-01-26 02:01:18.000000000 +0800
++++ i40e.spec   2016-11-15 09:44:58.806907126 +0800
+@@ -29,11 +29,12 @@ This package contains the Linux driver f
+ %setup
+ 
+ %build
+-make -C src clean
+-make -C src
++make -C src clean KSRC=/root/rpmbuild/BUILD/kernel-3.10.0-327.13.1.el7/linux-3.10.0-327.13.1.el7.ppc64le/
++make -C src KSRC=/root/rpmbuild/BUILD/kernel-3.10.0-327.13.1.el7/linux-3.10.0-327.13.1.el7.ppc64le/
+ 
+ %install
+-make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} install
++make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} install KSRC=/root/rpmbuild/BUILD/kernel-3.10.0-327.13.1.el7/linux-3.10.0-327.13.1.el7.ppc64le/
+ # Append .new to driver name to avoid conflict with kernel RPM
+
+最后 rpmbuild -ba i40e.spec 产生i40e-1.4.25-1.ppc64le.rpm
+
+安装过程：
+rpm -ivh i40e-1.4.25-1.ppc64le.rpm
+cp /lib/modules/3.10.0-327.13.1.el7.ppc64le.debug/updates/drivers/net/ethernet/intel/i40e/i40e.ko.new  /lib/modules/`uname -r`/kernel/drivers/net/ethernet/intel/i40e/i40e.ko
+modprobe i40e
