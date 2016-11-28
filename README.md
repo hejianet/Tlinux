@@ -1,6 +1,7 @@
 # Tlinux
 # centos72 ppc64le
 2016 Oct 5
+
 1. 网卡后2个端口的disable
 [改动]
  eth0、1、2、3 禁用2.3口
