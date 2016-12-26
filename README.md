@@ -49,4 +49,10 @@ md5sum 3ea3b9c6b3f7da561ed9d7fe6e2a19a3  kernel-3.10.0-327.13.1.el7.1.ppc64le.rp
 1.因为kernel升级到3.10.0-327.13.1.el7.1，需要rebuild i40e网卡。更新的i40e在这里
 https://pan.baidu.com/s/1nv8SK8x
 [root@localhost ppc64le]# md5sum i40e-1.4.25-1.ppc64le.rpm 
-40c06cbc13455be8a809db0d1db1a6c6  i40e-1.4.25-1.ppc64le.rpm
+40c06cbc13455be8a809db0d1db1a6c6  i40e-1.4.25-1.ppc64le.
+
+2016 Dec 26
+更改i40e驱动为kmod方式，i40e的内部版本升级为1.5.10k
+https://pan.baidu.com/s/1nvk89xn
+$ md5sum kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm 
+8a9b4dc5f4a6bd26ac67438050782b8b  kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm
