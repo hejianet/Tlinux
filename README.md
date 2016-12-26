@@ -52,7 +52,12 @@ https://pan.baidu.com/s/1nv8SK8x
 40c06cbc13455be8a809db0d1db1a6c6  i40e-1.4.25-1.ppc64le.
 
 2016 Dec 26
-更改i40e驱动为kmod方式，i40e的内部版本升级为1.5.10k
+[改动]i40e驱动为kmod方式，i40e的内部版本升级为1.5.10k
 https://pan.baidu.com/s/1nvk89xn
 $ md5sum kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm 
 8a9b4dc5f4a6bd26ac67438050782b8b  kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm
+[改动] lshw更新devicetree: Parse board serial number 
+https://pan.baidu.com/s/1o8axkIQ
+# md5sum lshw-B.02.18.43-2.ppc64le.rpm 
+df732f6dd6c325bbdf59a8bd9e3937af  lshw-B.02.18.43-2.ppc64le.rpm
+
