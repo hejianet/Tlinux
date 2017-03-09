@@ -59,6 +59,6 @@ $ md5sum kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm
 8a9b4dc5f4a6bd26ac67438050782b8b  kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm
 [改动] lshw更新devicetree: Parse board serial number 
 https://pan.baidu.com/s/1o8axkIQ
-# md5sum lshw-B.02.18.43-2.ppc64le.rpm 
+$ md5sum lshw-B.02.18.43-2.ppc64le.rpm 
 df732f6dd6c325bbdf59a8bd9e3937af  lshw-B.02.18.43-2.ppc64le.rpm
 
