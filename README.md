@@ -1,5 +1,5 @@
-# Tlinux
 # centos72 ppc64le
+
 2016 Oct 5
 
 1. 网卡后2个端口的disable
@@ -52,6 +52,7 @@ https://pan.baidu.com/s/1nv8SK8x
 40c06cbc13455be8a809db0d1db1a6c6  i40e-1.4.25-1.ppc64le.
 
 2016 Dec 26
+
 [改动]i40e驱动为kmod方式，i40e的内部版本升级为1.5.10k
 https://pan.baidu.com/s/1nvk89xn
 $ md5sum kmod-i40e-1.5.10_k-2.el7.ppc64le.rpm 
